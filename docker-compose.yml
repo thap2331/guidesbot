@@ -1,0 +1,110 @@
+services:
+  pacrimebot:
+    container_name: pacrimebots
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pacrimebot
+    networks:
+      - pacrimenet
+    depends_on:
+      pg_database:
+        condition: "service_healthy"
+  
+  pacrimebot-local:
+    env_file:
+      - .env
+    container_name: pacrimebots-local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pacrimebot
+    networks:
+      - pacrimenet
+    depends_on:
+      pg_database:
+        condition: "service_healthy"
+    volumes:
+      - ./:/app
+
+  pacrimebot-prod-api:
+    # Pass env vars while running the code in github actions
+    container_name: pacrimebot-prod-api
+    # environment:
+    #   - OPENAI_API_KEY=$${{ secrets.OPENAI_API_KEY }}
+    #   - PG_CONNECTION_STRING=$${{ secrets.PG_CONNECTION_STRING }}
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pacrimebotapi
+    command: uvicorn main:app --host 0.0.0.0
+    networks:
+      - pacrimenet
+    depends_on:
+      pg_database:
+        condition: "service_healthy"
+
+  pacrimebot-local-api:
+    env_file:
+      - .env
+    container_name: pacrimebot-local-api
+    ports:
+      - "8000:8000"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: pacrimebot-local
+    command: uvicorn main:app --host 0.0.0.0 --reload
+    networks:
+      - pacrimenet
+    depends_on:
+      pg_database:
+        condition: "service_healthy"
+    volumes:
+      - ./:/app
+
+  pg_database:
+    container_name: pg_container
+    image: pgvector/pgvector:pg16 #postgres:16.2
+    restart: on-failure
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: vectordb
+    volumes:
+       - legalbotvol:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    networks:
+      - pacrimenet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vectordb -p 5432 -h pg_container"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+  pgweb:
+    image: sosedoff/pgweb
+    networks:
+      - pacrimenet
+    environment:
+      - PGWEB_DATABASE_URL=postgres://postgres:pass@pg_container:5432/vectordb?sslmode=disable
+    depends_on:
+      pg_database:
+        condition: "service_healthy"
+    ports:
+      - target: 8081
+        published: 8002
+
+volumes:
+  legalbotvol:
+    name: legalbotvol
+
+networks:
+  pacrimenet:
+    name: pacrimenet
+    driver: bridge
